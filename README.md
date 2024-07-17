@@ -11,7 +11,7 @@ Resize zipped image galleries.
 
 ## Installation
 
-Grab `kompressor.phar` from the releases page.
+Grab the latest `kompressor.phar` from the [releases page](https://github.com/biohzrdmx/kompressor-cli/releases/latest).
 
 Most likely, you'll want to put the `kompressor.phar` into a directory on your `PATH`, so you can simply call `kompressor` from any directory, using for example:
 
