@@ -1,0 +1,7 @@
+{
+  "compactors": [ "KevinGH\\Box\\Compactor\\Php" ],
+  "check-requirements": false,
+  "compression": "GZ",
+  "main": "kompressor",
+  "output": "build/kompressor.phar"
+}

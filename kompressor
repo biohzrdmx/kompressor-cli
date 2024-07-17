@@ -1,0 +1,275 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types = 1);
+
+/**
+ * Kompressor
+ * Resize zipped image galleries
+ * @author  biohzrdmx <github.com/biohzrdmx>
+ * @copyright Copyright (c) 2024 biohzrdmx. All rights reserved
+ */
+
+use splitbrain\phpcli\CLI;
+use splitbrain\phpcli\Options;
+
+define('BASE_DIR', dirname(__FILE__));
+
+# Composer initialization
+if ( file_exists( BASE_DIR . '/vendor/autoload.php' ) ) {
+	require BASE_DIR . '/vendor/autoload.php';
+} else {
+	throw new RuntimeException('No autoload file, aborting');
+}
+
+class Kompressor extends CLI {
+
+	/**
+	 * Zip error messages
+	 */
+	protected array $zip_errors = [
+		ZipArchive::ER_MULTIDISK   => 'Multi-disk zip archives not supported',
+		ZipArchive::ER_RENAME      => 'Renaming temporary file failed',
+		ZipArchive::ER_CLOSE       => 'Closing zip archive failed',
+		ZipArchive::ER_SEEK        => 'Seek error',
+		ZipArchive::ER_READ        => 'Read error',
+		ZipArchive::ER_WRITE       => 'Write error',
+		ZipArchive::ER_CRC         => 'CRC error',
+		ZipArchive::ER_ZIPCLOSED   => 'Containing zip archive was closed',
+		ZipArchive::ER_NOENT       => 'No such file',
+		ZipArchive::ER_EXISTS      => 'File already exists',
+		ZipArchive::ER_OPEN        => 'Can\'t open file',
+		ZipArchive::ER_TMPOPEN     => 'Failure to create temporary file',
+		ZipArchive::ER_ZLIB        => 'Zlib error',
+		ZipArchive::ER_MEMORY      => 'Malloc failure',
+		ZipArchive::ER_CHANGED     => 'Entry has been changed',
+		ZipArchive::ER_COMPNOTSUPP => 'Compression method not supported',
+		ZipArchive::ER_EOF         => 'Premature EOF',
+		ZipArchive::ER_INVAL       => 'Invalid argument',
+		ZipArchive::ER_NOZIP       => 'Not a zip archive',
+		ZipArchive::ER_INTERNAL    => 'Internal error',
+		ZipArchive::ER_INCONS      => 'Zip archive inconsistent',
+		ZipArchive::ER_REMOVE      => 'Can\'t remove file',
+		ZipArchive::ER_DELETED     => 'Entry has been deleted',
+		ZipArchive::ER_OK          => 'No error',
+	];
+
+	/**
+	 * Input path
+	 */
+	protected string $input;
+
+	/**
+	 * JPEG quality
+	 */
+	protected int $quality = 90;
+
+	/**
+	 * Target image size on longest side
+	 */
+	protected int $size = 1200;
+
+	/**
+	 * Suffix for resulting archives
+	 */
+	protected string $suffix = 'proc';
+
+	/**
+	 * Skip known garbage files
+	 */
+	protected bool $skip = false;
+
+	/**
+	 * @inheritdoc
+	 */
+	protected function setup(Options $options) {
+		$options->setHelp('Resize zipped image galleries');
+		$options->registerOption('quality', 'JPEG quality, defaults to 90', 'q', 'quality');
+		$options->registerOption('size', 'Target image size on the longest side, defaults to 1200', 's', 'size');
+		$options->registerOption('suffix', 'Suffix for resulting archives, defaults to -proc', 'x', 'suffix');
+		$options->registerOption('list', 'List mode, <input> is a text file with a path per line', 'l');
+		$options->registerOption('skip', 'Skip known garbage files', 'k');
+		$options->registerArgument('input', 'Input ZIP file');
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	protected function main(Options $options) {
+		$args = $options->getArgs();
+		$this->input = $args[0] ?? '';
+		$this->size = (int) $options->getOpt('size', 1200);
+		$this->quality = (int) $options->getOpt('quality', 90);
+		$this->skip = $options->getOpt('skip');
+		if ($this->input) {
+			# Get input path
+			$path = realpath($this->input);
+			if ( is_dir($path) ) {
+				# Collect archives
+				$files = [];
+				foreach (new DirectoryIterator($path) as $file_info) {
+					if ( $file_info->isDot() ) continue;
+					$name = $file_info->getBasename( ".{$file_info->getExtension()}" );
+					if ( strtolower( $file_info->getExtension() ) == 'zip' ) {
+						if (! str_ends_with($name, "-{$this->suffix}") ) {
+							$files[] = $file_info->getRealPath();
+						}
+					}
+				}
+				# Process files
+				$count = count($files);
+				$this->blank();
+				$this->warning(sprintf(' Directory mode, %s files found', number_format((float)$count)));
+				$counter = 0;
+				foreach ($files as $file) {
+					$counter++;
+					$this->process($file, sprintf('[%02d/%02d] ', $counter, count($files)));
+				}
+				$this->blank();
+				$this->success(sprintf(' Finished, %s files processed', number_format((float)$count)));
+			} else {
+				if ( $options->getOpt('list') ) {
+					$handle = fopen($path, 'r');
+					if ($handle) {
+						# Collect files
+						$files = [];
+						while (($line = fgets($handle)) !== false) {
+							$path = trim($line);
+							if ( file_exists( $path ) ) {
+								$files[] = realpath($path);
+							}
+						}
+						fclose($handle);
+						# Process files
+						$count = count($files);
+						$this->blank();
+						$this->warning(sprintf(' List mode, %s files found', number_format((float)$count)));
+						$counter = 0;
+						foreach ($files as $file) {
+							$counter++;
+							$this->process($file, sprintf('[%02d/%02d] ', $counter, count($files)));
+						}
+						$this->blank();
+						$this->success(sprintf(' Finished, %s files processed', number_format((float)$count)));
+					}
+				} else {
+					$this->blank();
+					$this->warning(' Single file mode');
+					$this->process($path);
+				}
+			}
+		} else {
+			echo $options->help();
+		}
+	}
+
+	/**
+	 * Output an empty line
+	 */
+	protected function blank(): void {
+		echo(PHP_EOL);
+	}
+
+	/**
+	 * Format size in bytes
+	 * @param  int $size      Size in bytes
+	 * @param  int $precision Precision digits
+	 */
+	protected function formatBytes(int $size, int $precision = 2): string {
+		for ($i = 0; ($size / 1024) > 0.9; $i++, $size /= 1024) {}
+		return round($size, $precision).['B','kB','MB','GB','TB','PB','EB','ZB','YB'][$i];
+	}
+
+	/**
+	 * Process file
+	 * @param  string $path   File path
+	 * @param  string $prefix Status prefix
+	 */
+	protected function process(string $path, string $prefix = ''): void {
+		$info = pathinfo($path);
+		$input = new ZipArchive();
+		$result = $input->open($path, ZipArchive::RDONLY);
+		if ($result === true) {
+			#
+			$this->blank();
+			$size = filesize($path);
+			$this->info(sprintf(" %sProcessing %s (%s)...", $prefix, $path, $this->formatBytes($size)));
+			$this->blank();
+			$out_path = implode(DIRECTORY_SEPARATOR, [
+				$info['dirname'],
+				"{$info['filename']}-{$this->suffix}.{$info['extension']}",
+			]);
+			$output = new ZipArchive();
+			$result = $output->open($out_path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+			if ($result === true) {
+				# Collect files
+				$files = [];
+				$count = $input->count();
+				for ($index = 0; $index < $count; $index++) {
+					$name = $input->getNameIndex($index);
+					if ($this->skip && str_starts_with($name, '__')) continue;
+					$info = pathinfo($name);
+					if ( in_array( strtolower( $info['extension'] ?? '' ), ['jpg', 'jpeg'] ) ) {
+						$files[$index] = $name;
+					}
+				}
+				# Process files
+				$count = count($files);
+				foreach ($files as $index => $name) {
+					$contents = $input->getFromIndex($index);
+					$image = imagecreatefromstring($contents);
+					$width = imagesx($image);
+					$height = imagesy($image);
+					if ($width > $height) {
+						# Wider
+						$ratio = $height / $width;
+						$new_width = (int) min($this->size, $width);
+						$new_height = (int) floor($new_width * $ratio);
+					} else if ($height > $width) {
+						# Taller
+						$ratio = $width / $height;
+						$new_height = (int) min($this->size, $height);
+						$new_width = (int) floor($new_height * $ratio);
+					} else {
+						# Square
+						$ratio = 1;
+						$new_width = $new_height = (int) min($this->size, $width);
+					}
+					$resized = imagecreatetruecolor($new_width, $new_height);
+					imagecopyresampled($resized, $image, 0, 0, 0, 0, $new_width, $new_height, $width, $height);
+					# Show progress
+					$counter = $index + 1;
+					$this->info( sprintf('  [%02d/%02d] %s: %dx%d -> %dx%d', $counter, $count, $name, $width, $height, $new_width, $new_height) );
+					# Get the resulting image
+					ob_start();
+					imagejpeg($resized, null, $this->quality);
+					$contents = ob_get_clean();
+					$output->addFromString($name, $contents);
+					# Free resources
+					imagedestroy($image);
+					imagedestroy($resized);
+				}
+				# Close destination archive
+				$output->close();
+				# Show stats
+				$this->blank();
+				$new_size = filesize($out_path);
+				$percent = number_format(($new_size * 100) / $size, 1);
+				$this->success(sprintf(" Saved to %s (%s, %s%% of original)", $out_path, $this->formatBytes($new_size), $percent));
+			} else {
+				$this->blank();
+				$this->error( sprintf(' Error creating destination ZIP file: %s', $this->zip_errors[$result] ?? 'Unknown error') );
+			}
+			#
+			$input->close();
+		} else {
+			$this->blank();
+			$this->error( sprintf(' Error opening source ZIP file: %s', $this->zip_errors[$result] ?? 'Unknown error') );
+		}
+	}
+}
+
+(function() {
+	$kompressor = new Kompressor();
+	$kompressor->run();
+})();
