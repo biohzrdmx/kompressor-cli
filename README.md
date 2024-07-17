@@ -13,7 +13,7 @@ Resize zipped image galleries.
 
 Grab `kompressor.phar` from the releases page.
 
-Most likely, you want to put the `kompressor.phar` into a directory on your `PATH`, so you can simply call `kompressor` from any directory, using for example:
+Most likely, you'll want to put the `kompressor.phar` into a directory on your `PATH`, so you can simply call `kompressor` from any directory, using for example:
 
 **On Linux**
 
@@ -25,7 +25,7 @@ Don't forget to make it executable.
 
 **On Windows**
 
-The easiest way is to use a `cmd` wrapper, put `kompressor.phar` in a directory under your `PATH` and create a file name `kompressor.cmd` in the same directory with the following contents:
+The easiest way is to use a `cmd` wrapper, put `kompressor.phar` in a directory under your `PATH` and create a file named `kompressor.cmd` in the same directory with the following contents:
 
 ```bash
 @php "%~dp0kompressor.phar" %*
